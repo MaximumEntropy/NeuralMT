@@ -24,7 +24,8 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-lines = [line.strip().split() for line in codecs.open(
+print 'Reading file ...'
+lines = [line.strip().lower().split() for line in codecs.open(
     args.input_file,
     'r',
     encoding='utf-8'
@@ -32,26 +33,34 @@ lines = [line.strip().split() for line in codecs.open(
 
 vocab = {}
 
-for line in lines:
+print 'Creating vocabulary ...'
+for ind, line in enumerate(lines):
+    if ind % 100000 == 0:
+        print 'Finished %d out of %d lines ' % (ind, len(lines))
     for word in line:
         if word not in vocab:
             vocab[word] = 1
         else:
             vocab[word] += 1
 
+print 'Trimming vocabulary ...'
 trimmed_vocab = set(sorted(
     vocab,
     key=lambda x: vocab[x],
     reverse=True
 )[:int(args.count)])
 
+print '%d items in trimmed vocabulary ' % (len(trimmed_vocab))
+
+print 'Replacing with unks ...'
 unked_lines = [
-    [x.lower() if x in trimmed_vocab else '<unk>' for x in line]
+    [x if x in trimmed_vocab else '<unk>' for x in line]
     for line in lines
 ]
 
 f = codecs.open(args.output_file, 'w', encoding='utf-8')
 
+print 'Writing output file ...'
 for line in unked_lines:
     f.write(' '.join(line) + '\n')
 f.close()
