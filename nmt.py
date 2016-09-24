@@ -3,6 +3,8 @@ import theano
 import theano.tensor as T
 import numpy as np
 import sys
+reload(sys)
+sys.setdefaultencoding('utf8')
 import codecs
 from collections import Counter
 import math
@@ -14,7 +16,7 @@ import pickle
 
 sys.path.append('/u/subramas/Research/SanDeepLearn/')
 
-from recurrent import FastLSTM
+from recurrent import FastLSTM, GRU
 from layer import FullyConnectedLayer, EmbeddingLayer
 from optimizers import Optimizer
 from config import src_emb_dim, tgt_emb_dim, src_lstm_op_dim, tgt_lstm_op_dim, \
@@ -152,8 +154,8 @@ def softmax_3d(x):
 
 def prepare_batch(src_sentences, tgt_sentences):
     """Prepare a mini-batch for training."""
-    src_sentences = [['<s>'] + sent + ['</s>'] for sent in src_sentences]
-    tgt_sentences = [['<s>'] + sent + ['</s>'] for sent in tgt_sentences]
+    src_sentences = [['<s>'] + sent[:40] + ['</s>'] for sent in src_sentences]
+    tgt_sentences = [['<s>'] + sent[:40] + ['</s>'] for sent in tgt_sentences]
     src_lens = [len(sent) for sent in src_sentences]
     tgt_lens = [len(sent) for sent in tgt_sentences]
     max_src_len = max(src_lens)
@@ -189,7 +191,7 @@ def prepare_batch(src_sentences, tgt_sentences):
 
 def prepare_evaluation_batch(src_sentences):
     """Prepare a mini-batch for evaluation."""
-    src_sentences = [['<s>'] + sent + ['</s>'] for sent in src_sentences]
+    src_sentences = [['<s>'] + sent[:40] + ['</s>'] for sent in src_sentences]
     src_lens = [len(sent) for sent in src_sentences]
     max_src_len = max(src_lens)
     src_sentences = [
@@ -284,19 +286,21 @@ def shuffle_data(src, tgt):
     return src, tgt
 
 
-def save_model(epoch, model_params):
+def save_model(epoch, minibatch, model_params):
     """Save the entire model."""
     if not os.path.exists('/data/lisatmp4/subramas/models/%s' % (
         experiment_name
     )):
         os.mkdir('/data/lisatmp4/subramas/models/%s' % (experiment_name))
-    os.mkdir('/data/lisatmp4/subramas/models/%s/epoch_%d' % (
+    os.mkdir('/data/lisatmp4/subramas/models/%s/epoch_%d_minibatch_%d' % (
         experiment_name,
-        epoch
+        epoch,
+        minibatch
     ))
-    model_path = '/data/lisatmp4/subramas/models/%s/epoch_%d' % (
+    model_path = '/data/lisatmp4/subramas/models/%s/epoch_%d_minibatch_%d' % (
         experiment_name,
-        epoch
+        epoch,
+        minibatch
     )
     logging.info('Saving word embeddings ...')
     for param in model_params:
@@ -316,11 +320,12 @@ def save_model(epoch, model_params):
     )
 
 
-def load_model(epoch, model_params):
+def load_model(epoch, minibatch, model_params):
     """Load a model's parameters."""
-    model_path = '/data/lisatmp4/subramas/models/%s/epoch_%d' % (
+    model_path = '/data/lisatmp4/subramas/models/%s/epoch_%d_minibatch_%d' % (
         experiment_name,
-        epoch
+        epoch,
+        minibatch
     )
     assert len(model_params) == len(os.listdir(model_path))
     for param in model_params:
@@ -384,6 +389,37 @@ def get_pretrained_embedding_layer(file_path, vocab, src_tgt):
     )
     return embedding_layer, word2ind, ind2word
 
+
+def print_decoded_dev(dev_predictions, n=10):
+    """Print the first n decoded sentences."""
+    logging.info('Printing decoded dev sentences ...')
+    for i in xrange(n):
+        logging.info(' '.join(dev_predictions[i]))
+
+
+def generate_samples(
+    batch_src,
+    batch_tgt_inp,
+    batch_src_lens,
+):
+    """Generate random samples."""
+    decoded_batch = f_eval(
+        batch_src,
+        batch_tgt_inp,
+        batch_src_lens,
+    )
+    decoded_batch = np.argmax(decoded_batch, axis=2)
+    for ind, sentence in enumerate(decoded_batch[:10]):
+        logging.info('Src : %s ' % (' '.join([
+            src_ind2word[x] for x in batch_src[ind]]
+        )))
+        logging.info('Tgt : %s ' % (' '.join([
+            tgt_ind2word[x] for x in batch_tgt_inp[ind]]
+        )))
+        logging.info('Sample : %s ' % (' '.join([
+            tgt_ind2word[x] for x in decoded_batch[ind]]
+        )))
+
 # Read training and dev data
 train_src = [line.strip().split() for line in codecs.open(
     data_path_train_src,
@@ -396,12 +432,12 @@ train_tgt = [line.strip().split() for line in codecs.open(
     encoding='utf-8'
 )]
 
-dev_src = [line.strip().split() for line in codecs.open(
+dev_src = [line.strip().lower().split() for line in codecs.open(
     data_path_dev_src,
     'r',
     encoding='utf-8'
 )]
-dev_tgt = [line.strip().split() for line in codecs.open(
+dev_tgt = [line.strip().lower().split() for line in codecs.open(
     data_path_dev_tgt,
     'r',
     encoding='utf-8'
@@ -474,38 +510,43 @@ if args.pretrained_tgt != 'none':
 
 # Encoder BiLSTM and Decoder LSTM
 encoder_forward = [
-    FastLSTM(
+    GRU(
         input_dim=src_emb_dim,
         output_dim=src_lstm_op_dim,
+        batch_input=True,
         name='src_lstm_forward_0'
     )
 ]
 encoder_backward = [
-    FastLSTM(
+    GRU(
         input_dim=src_emb_dim,
         output_dim=src_lstm_op_dim,
+        batch_input=True,
         name='src_lstm_backward_0'
     )
 ]
 # Make the LSTM deep
 for i in range(int(args.num_encoder_layers) - 1):
     encoder_forward.append(
-        FastLSTM(
+        GRU(
             input_dim=2 * src_lstm_op_dim,
             output_dim=src_lstm_op_dim,
+            batch_input=True,
             name='src_lstm_forward_%d' % (i)
         )
     )
     encoder_backward.append(
-        FastLSTM(
+        GRU(
             input_dim=2 * src_lstm_op_dim,
             output_dim=src_lstm_op_dim,
+            batch_input=True,
             name='src_lstm_backward_%d' % (i)
         )
     )
-tgt_lstm = FastLSTM(
+tgt_lstm = GRU(
     input_dim=tgt_emb_dim,
     output_dim=tgt_lstm_op_dim,
+    batch_input=True,
     name='tgt_lstm'
 )
 
@@ -516,6 +557,14 @@ tgt_lstm_h_to_vocab = FullyConnectedLayer(
     batch_normalization=False,
     activation='softmax',
     name='tgt_lstm_h_to_vocab'
+)
+
+encoder_decoder_projection = FullyConnectedLayer(
+    input_dim=2 * src_lstm_op_dim,
+    output_dim=tgt_lstm_op_dim,
+    batch_normalization=False,
+    activation='tanh',
+    name='encoder_decoder_connection'
 )
 
 if args.attention == 'mlp':
@@ -536,7 +585,8 @@ if args.attention == 'mlp':
     )
 
 # Set model parameters
-params = src_embedding_layer.params + tgt_embedding_layer.params
+params = src_embedding_layer.params + tgt_embedding_layer.params + \
+    encoder_decoder_projection.params
 for rnn in encoder_forward + encoder_backward:
     params += rnn.params
 params += tgt_lstm.params[:-1] + tgt_lstm_h_to_vocab.params
@@ -548,9 +598,10 @@ logging.info('Model parameters ...')
 logging.info('Src Embedding dim : %d ' % (src_emb_dim))
 logging.info('Tgt Embedding dim : %d ' % (tgt_emb_dim))
 logging.info('Encoder BiLSTM dim : %d ' % (2 * encoder_forward[-1].output_dim))
+logging.info('Batch size : %s ' % (batch_size))
 logging.info('Decoder LSTM dim : %d ' % (tgt_lstm.output_dim))
 logging.info('Attention mechanism : %s ' % (args.attention))
-logging.info('Batch size : %s ' % (batch_size))
+logging.info('Depth : %s ' % (args.num_encoder_layers))
 
 # Get embedding matrices
 src_emb_inp = src_embedding_layer.fprop(src_inp)
@@ -577,7 +628,7 @@ encoder_final_state = encoder_representation.dimshuffle(1, 0, 2)[
 ]
 
 # Get Target LSTM representation & Attention Vectors
-tgt_lstm.h_0 = encoder_final_state
+tgt_lstm.h_0 = encoder_decoder_projection.fprop(encoder_final_state)
 tgt_lstm.fprop(tgt_emb_inp)
 
 # Attention
@@ -634,20 +685,6 @@ cost = - (T.log(final_output[
     tgt_op.flatten()
 ]) * tgt_mask.flatten()).sum() / T.neq(tgt_mask, 0).sum()
 
-cost += beta * T.mean(
-    (tgt_lstm.h[:, :-1] ** 2 - tgt_lstm.h[:, 1:] ** 2) ** 2
-)  # Regularization of RNNs from http://arxiv.org/pdf/1511.08400v6.pdf
-
-for rnn in encoder_forward:
-    cost += beta * T.mean(
-        (rnn.h[:, :-1] ** 2 - rnn.h[:, 1:] ** 2) ** 2
-    )
-
-for rnn in encoder_backward:
-    cost += beta * T.mean(
-        (rnn.h[:, :-1] ** 2 - rnn.h[:, 1:] ** 2) ** 2
-    )
-
 logging.info('Computation Graph Node Shapes ...')
 logging.info('src embedding dim : %s ' % (
     src_emb_inp.eval({src_inp: src_inp_t}).shape,)
@@ -697,9 +734,9 @@ logging.info('cost : %.3f' % (cost.eval(
 
 logging.info('Compiling theano functions ...')
 
-updates = Optimizer(clip=5.0).sgdmomentum(
+updates = Optimizer(clip=5.0).adam(
     cost=cost,
-    params=params
+    params=params,
 )
 
 f_train = theano.function(
@@ -713,6 +750,7 @@ f_eval = theano.function(
     outputs=final_output,
 )
 
+
 if args.load_model != 'none':
     src_word2ind, src_ind2word, tgt_word2ind, tgt_ind2word \
         = load_model(int(args.load_model), params)
@@ -725,13 +763,15 @@ dev_tgt = [
 epoch_offset = 0 if args.load_model == 'none' else int(args.load_model)
 num_epochs = 100
 logging.info('Training network ...')
+BEST_BLEU = 1.0
+costs = []
 for i in range(num_epochs):
     logging.info('Shuffling data ...')
     train_src, train_tgt = shuffle_data(train_src, train_tgt)
     for j in xrange(0, len(train_src), batch_size):
         batch_src, batch_tgt_inp, batch_tgt_op, batch_src_lens, batch_tgt_mask \
             = prepare_batch(
-                train_src[j:j + batch_size], train_tgt[j:j + batch_size]
+                train_src[j: j + batch_size], train_tgt[j: j + batch_size]
             )
         entropy = f_train(
             batch_src,
@@ -740,14 +780,37 @@ for i in range(num_epochs):
             batch_src_lens,
             batch_tgt_mask
         )
+        costs.append(entropy)
         logging.info('Epoch : %d Minibatch : %d Loss : %.3f' % (
             i + epoch_offset,
             j,
             entropy
         ))
+        if j % 64000 == 0 and j != 0:
+            dev_predictions = decode_dev()
+            dev_bleu = get_validation_bleu(dev_predictions, dev_tgt)
+            if dev_bleu > BEST_BLEU:
+                BEST_BLEU = dev_bleu
+                print_decoded_dev(dev_predictions)
+                save_model(i + epoch_offset, j, params)
+            logging.info('Epoch : %d Minibatch :%d dev BLEU : %.3f' % (
+                i + epoch_offset,
+                j,
+                dev_bleu)
+            )
+            logging.info('Mean Cost : %.3f' % (np.mean(costs)))
+            costs = []
+        if j % 6400 == 0:
+            generate_samples(batch_src, batch_tgt_inp, batch_src_lens)
     dev_predictions = decode_dev()
+    dev_bleu = get_validation_bleu(dev_predictions, dev_tgt)
+    if dev_bleu > BEST_BLEU:
+        BEST_BLEU = dev_bleu
+        print_decoded_dev(dev_predictions)
+        save_model(i + epoch_offset, j, params)
     logging.info('Epoch : %d dev BLEU : %.3f' % (
         i + epoch_offset,
-        get_validation_bleu(dev_predictions, dev_tgt))
+        dev_bleu)
     )
-    save_model(i + epoch_offset, params)
+    logging.info('Mean Cost : %.3f' % (np.mean(costs)))
+    costs = []
