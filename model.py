@@ -7,6 +7,8 @@ import sys
 
 sys.path.append('/u/subramas/Research/SanDeepLearn/')
 
+from recurrent import FastLSTM
+
 
 def str2float(line):
     """List of string numbers to float array."""
@@ -82,6 +84,66 @@ def load_model(name, model_params):
     )
 
     return src_word2ind, src_ind2word, tgt_word2ind, tgt_ind2word
+
+
+def load_lstm(folder_path, layer_num):
+    """Load LSTM weights and bias."""
+    lstm_W = np.load(open(
+        '%s/%s' % (folder_path, 'lstm_%d_W.npy' % (layer_num)),
+        'rb'
+    ))
+    lstm_U = np.load(open(
+        '%s/%s' % (folder_path, 'lstm_%d_W.npy' % (layer_num)),
+        'rb'
+    ))
+    lstm_b = np.load(open(
+        '%s/%s' % (folder_path, 'lstm_%d_b.npy' % (layer_num)),
+        'rb'
+    ))
+    return lstm_W, lstm_U, lstm_b
+
+
+def set_lstm_params(lstm, lstm_W, lstm_U, lstm_b):
+    """Set parameters of an LSTM."""
+    lstm.W.set_value(lstm_W)
+    lstm.U.set_value(lstm_U)
+    lstm.b.set_value(lstm_b)
+
+
+def load_tf_model(folder_path):
+    """Load tensorflow model."""
+    assert os.path.exists(folder_path)
+
+    lstm_0 = FastLSTM(
+        input_dim=1024,
+        output_dim=1024,
+        name='lstm_0'
+    )
+    lstm_1 = FastLSTM(
+        input_dim=1024,
+        output_dim=1024,
+        name='lstm_1'
+    )
+    lstm_2 = FastLSTM(
+        input_dim=1024,
+        output_dim=1024,
+        name='lstm_2'
+    )
+
+    lstm_0_W, lstm_0_U, lstm_0_b = load_lstm(folder_path, 0)
+    lstm_1_W, lstm_1_U, lstm_1_b = load_lstm(folder_path, 1)
+    lstm_2_W, lstm_2_U, lstm_2_b = load_lstm(folder_path, 2)
+
+    set_lstm_params(lstm_0, lstm_0_W, lstm_0_U, lstm_0_b)
+    set_lstm_params(lstm_1, lstm_1_W, lstm_1_U, lstm_1_b)
+    set_lstm_params(lstm_2, lstm_2_W, lstm_2_U, lstm_2_b)
+
+    src_embedding = np.load(open(
+        '%s/%s' % (folder_path, 'src_embedding.npy'),
+        'rb'
+    ))
+
+    return src_embedding, lstm_0, lstm_1, lstm_2
 
 
 def get_pretrained_embedding_layer(file_path, vocab, src_tgt):
