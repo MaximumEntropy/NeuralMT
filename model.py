@@ -89,15 +89,15 @@ def load_model(name, model_params):
 def load_lstm(folder_path, layer_num):
     """Load LSTM weights and bias."""
     lstm_W = np.load(open(
-        '%s/%s' % (folder_path, 'lstm_%d_W.npy' % (layer_num)),
+        '%s/%s' % (folder_path, 'lstm_W_%d.npy' % (layer_num)),
         'rb'
     ))
     lstm_U = np.load(open(
-        '%s/%s' % (folder_path, 'lstm_%d_W.npy' % (layer_num)),
+        '%s/%s' % (folder_path, 'lstm_U_%d.npy' % (layer_num)),
         'rb'
     ))
     lstm_b = np.load(open(
-        '%s/%s' % (folder_path, 'lstm_%d_b.npy' % (layer_num)),
+        '%s/%s' % (folder_path, 'lstm_b_%d.npy' % (layer_num)),
         'rb'
     ))
     return lstm_W, lstm_U, lstm_b
