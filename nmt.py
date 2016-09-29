@@ -6,21 +6,20 @@ import sys
 reload(sys)
 sys.setdefaultencoding('utf8')
 import codecs
-from collections import Counter
-import math
 import argparse
 import logging
-from sklearn.utils import shuffle
-import os
-import pickle
+
+from model import save_model, load_model, get_pretrained_embedding_layer
+from bleu import get_bleu
+from data_utils import prepare_batch, prepare_evaluation_batch, get_vocab, \
+    shuffle_data
 
 sys.path.append('/u/subramas/Research/SanDeepLearn/')
 
-from recurrent import FastLSTM, GRU
+from recurrent import FastLSTM
 from layer import FullyConnectedLayer, EmbeddingLayer
 from optimizers import Optimizer
-from config import src_emb_dim, tgt_emb_dim, src_lstm_op_dim, tgt_lstm_op_dim, \
-    beta
+from config import src_emb_dim, tgt_emb_dim, src_lstm_op_dim, tgt_lstm_op_dim
 
 theano.config.floatX = 'float32'
 
@@ -127,24 +126,6 @@ console.setFormatter(formatter)
 logging.getLogger('').addHandler(console)
 
 
-def get_vocab(lines):
-    """Get vocabulary for a language."""
-    vocab = set()
-    for line in lines:
-        for word in line:
-            vocab.add(word)
-    vocab.add('<s>')
-    vocab.add('</s>')
-    vocab.add('<unk>')
-    word2ind = {}
-    ind2word = {}
-
-    for ind, word in enumerate(vocab):
-        word2ind[word] = ind
-        ind2word[ind] = word
-    return vocab, word2ind, ind2word
-
-
 def softmax_3d(x):
     """Compute softmax on 3D tensor by broadcasting first dim."""
     e = T.exp(x - T.max(x, axis=-1, keepdims=True))
@@ -152,60 +133,12 @@ def softmax_3d(x):
     return e / s
 
 
-def prepare_batch(src_sentences, tgt_sentences):
-    """Prepare a mini-batch for training."""
-    src_sentences = [['<s>'] + sent[:40] + ['</s>'] for sent in src_sentences]
-    tgt_sentences = [['<s>'] + sent[:40] + ['</s>'] for sent in tgt_sentences]
-    src_lens = [len(sent) for sent in src_sentences]
-    tgt_lens = [len(sent) for sent in tgt_sentences]
-    max_src_len = max(src_lens)
-    max_tgt_len = max(tgt_lens)
-    src_sentences = [
-        [src_word2ind[word] if word in src_word2ind else src_word2ind['<unk>'] for word in sent] +
-        [src_word2ind['<unk>']] * (max_src_len - len(sent))
-        for sent in src_sentences
-    ]
-    tgt_sentences_inp = [
-        [tgt_word2ind[word] if word in tgt_word2ind else tgt_word2ind['<unk>'] for word in sent[:-1]] +
-        [tgt_word2ind['<unk>']] * (max_tgt_len - len(sent))
-        for sent in tgt_sentences
-    ]
-    tgt_sentences_op = [
-        [tgt_word2ind[word] if word in tgt_word2ind else tgt_word2ind['<unk>'] for word in sent[1:]] +
-        [tgt_word2ind['<unk>']] * (max_tgt_len - len(sent))
-        for sent in tgt_sentences
-    ]
-    tgt_mask = np.array(
-        [
-            ([1] * (l - 1)) + ([0] * (max_tgt_len - l))
-            for l in tgt_lens
-        ]
-    ).astype(np.float32)
-    src_sentences = np.array(src_sentences).astype(np.int32)
-    tgt_sentences_inp = np.array(tgt_sentences_inp).astype(np.int32)
-    tgt_sentences_op = np.array(tgt_sentences_op).astype(np.int32)
-    src_lens = np.array(src_lens).astype(np.int32)
-    return src_sentences, tgt_sentences_inp, tgt_sentences_op, \
-        src_lens, tgt_mask
-
-
-def prepare_evaluation_batch(src_sentences):
-    """Prepare a mini-batch for evaluation."""
-    src_sentences = [['<s>'] + sent[:40] + ['</s>'] for sent in src_sentences]
-    src_lens = [len(sent) for sent in src_sentences]
-    max_src_len = max(src_lens)
-    src_sentences = [
-        [src_word2ind[word] if word in src_word2ind else src_word2ind['<unk>'] for word in sent] +
-        [src_word2ind['<unk>']] * (max_src_len - len(sent))
-        for sent in src_sentences
-    ]
-    src_sentences = np.array(src_sentences).astype(np.int32)
-    return src_sentences, src_lens
-
-
 def decode_batch(src_sentences):
     """Decode one mini-batch for source sentences."""
-    src_sentences, src_lens = prepare_evaluation_batch(src_sentences)
+    src_sentences, src_lens = prepare_evaluation_batch(
+        src_sentences,
+        src_word2ind
+    )
     decode_state = np.array(
         [[tgt_word2ind['<s>']] for _ in src_sentences]
     ).astype(np.int32)
@@ -244,152 +177,6 @@ def decode_dev():
     return decoded_sentences
 
 
-def bleu_stats(hypothesis, reference):
-    """Compute statistics for BLEU."""
-    stats = []
-    stats.append(len(hypothesis))
-    stats.append(len(reference))
-    for n in xrange(1, 5):
-        s_ngrams = Counter(
-            [tuple(hypothesis[i:i+n]) for i in xrange(len(hypothesis)+1-n)]
-        )
-        r_ngrams = Counter(
-            [tuple(reference[i:i+n]) for i in xrange(len(reference)+1-n)]
-        )
-        stats.append(max([sum((s_ngrams & r_ngrams).values()), 0]))
-        stats.append(max([len(hypothesis)+1-n, 0]))
-    return stats
-
-
-def bleu(stats):
-    """Compute BLEU given n-gram statistics."""
-    if len(filter(lambda x: x == 0, stats)) > 0:
-        return 0
-    (c, r) = stats[:2]
-    log_bleu_prec = sum(
-        [math.log(float(x)/y) for x, y in zip(stats[2::2], stats[3::2])]
-    ) / 4.
-    return math.exp(min([0, 1-float(r)/c]) + log_bleu_prec)
-
-
-def get_validation_bleu(hypotheses, reference):
-    """Get validation BLEU score for dev set."""
-    stats = np.array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
-    for hyp, ref in zip(hypotheses, reference):
-        stats += np.array(bleu_stats(hyp, ref))
-    return 100 * bleu(stats)
-
-
-def shuffle_data(src, tgt):
-    """Shuffle source and target."""
-    src, tgt = shuffle(src, tgt)
-    return src, tgt
-
-
-def save_model(epoch, minibatch, model_params):
-    """Save the entire model."""
-    if not os.path.exists('/data/lisatmp4/subramas/models/%s' % (
-        experiment_name
-    )):
-        os.mkdir('/data/lisatmp4/subramas/models/%s' % (experiment_name))
-    os.mkdir('/data/lisatmp4/subramas/models/%s/epoch_%d_minibatch_%d' % (
-        experiment_name,
-        epoch,
-        minibatch
-    ))
-    model_path = '/data/lisatmp4/subramas/models/%s/epoch_%d_minibatch_%d' % (
-        experiment_name,
-        epoch,
-        minibatch
-    )
-    logging.info('Saving word embeddings ...')
-    for param in model_params:
-        logging.info('Saving parameter %s ' % (param.name))
-        np.save('%s/%s' % (model_path, param.name), param.get_value())
-    pickle.dump(
-        src_word2ind, open('%s/%s' % (model_path, 'src_word2ind'), 'wb')
-    )
-    pickle.dump(
-        src_ind2word, open('%s/%s' % (model_path, 'src_ind2word'), 'wb')
-    )
-    pickle.dump(
-        tgt_word2ind, open('%s/%s' % (model_path, 'tgt_word2ind'), 'wb')
-    )
-    pickle.dump(
-        tgt_ind2word, open('%s/%s' % (model_path, 'tgt_ind2word'), 'wb')
-    )
-
-
-def load_model(epoch, minibatch, model_params):
-    """Load a model's parameters."""
-    model_path = '/data/lisatmp4/subramas/models/%s/epoch_%d_minibatch_%d' % (
-        experiment_name,
-        epoch,
-        minibatch
-    )
-    assert len(model_params) == len(os.listdir(model_path))
-    for param in model_params:
-        assert os.path.exists('%s/%s.npy' % (model_path, param.name))
-    for param in model_params:
-        value = np.load('%s/%s.npy' % (model_path, param.name))
-        param.set_value(value)
-
-    src_word2ind = pickle.load(
-        open('%s/%s' % (model_path, 'src_word2ind'), 'rb')
-    )
-    src_ind2word = pickle.load(
-        open('%s/%s' % (model_path, 'src_ind2word'), 'rb')
-    )
-    tgt_word2ind = pickle.load(
-        open('%s/%s' % (model_path, 'tgt_word2ind'), 'rb')
-    )
-    tgt_ind2word = pickle.load(
-        open('%s/%s' % (model_path, 'tgt_ind2word'), 'rb')
-    )
-
-    return src_word2ind, src_ind2word, tgt_word2ind, tgt_ind2word
-
-
-def str2float(line):
-    """List of string numbers to float array."""
-    return np.array(line).astype(np.float32)
-
-
-def get_pretrained_embedding_layer(file_path, vocab, src_tgt):
-    """Create a pretrained emebdding lookup table."""
-    pretrained_lines = [line.strip().split() for line in codecs.open(
-        file_path,
-        'r',
-        encoding='utf-8'
-    )]
-    word2ind = {}
-    ind2word = {}
-    ind = 0
-    emebdding_dim = int(pretrained_lines[0][1])
-    pretrained_lines = {
-        line[0]: str2float(line[1:]) for line in pretrained_lines[1:]
-        if len(line) == emebdding_dim + 1
-    }
-    pretrained_embedding = np.random.rand(
-        len(vocab),
-        emebdding_dim
-    ).astype(np.float32)
-    for ind, word in enumerate(vocab):
-        word2ind[word] = ind
-        ind2word[ind] = word
-        if word in pretrained_lines:
-            pretrained_embedding[ind] = pretrained_lines[word]
-        elif word == '<unk>':
-            pretrained_embedding[ind] = pretrained_lines['unk']
-    embedding_layer = EmbeddingLayer(
-        input_dim=pretrained_embedding.shape[0],
-        output_dim=pretrained_embedding.shape[1],
-        pretrained=pretrained_embedding,
-        name='pretrained_embedding_%s' % (src_tgt)
-    )
-    return embedding_layer, word2ind, ind2word
-
-
 def print_decoded_dev(dev_predictions, n=10):
     """Print the first n decoded sentences."""
     logging.info('Printing decoded dev sentences ...')
@@ -419,6 +206,7 @@ def generate_samples(
         logging.info('Sample : %s ' % (' '.join([
             tgt_ind2word[x] for x in decoded_batch[ind]]
         )))
+        logging.info('=======================================================')
 
 # Read training and dev data
 train_src = [line.strip().split() for line in codecs.open(
@@ -510,43 +298,38 @@ if args.pretrained_tgt != 'none':
 
 # Encoder BiLSTM and Decoder LSTM
 encoder_forward = [
-    GRU(
+    FastLSTM(
         input_dim=src_emb_dim,
         output_dim=src_lstm_op_dim,
-        batch_input=True,
         name='src_lstm_forward_0'
     )
 ]
 encoder_backward = [
-    GRU(
+    FastLSTM(
         input_dim=src_emb_dim,
         output_dim=src_lstm_op_dim,
-        batch_input=True,
         name='src_lstm_backward_0'
     )
 ]
 # Make the LSTM deep
 for i in range(int(args.num_encoder_layers) - 1):
     encoder_forward.append(
-        GRU(
+        FastLSTM(
             input_dim=2 * src_lstm_op_dim,
             output_dim=src_lstm_op_dim,
-            batch_input=True,
             name='src_lstm_forward_%d' % (i)
         )
     )
     encoder_backward.append(
-        GRU(
+        FastLSTM(
             input_dim=2 * src_lstm_op_dim,
             output_dim=src_lstm_op_dim,
-            batch_input=True,
             name='src_lstm_backward_%d' % (i)
         )
     )
-tgt_lstm = GRU(
+tgt_lstm = FastLSTM(
     input_dim=tgt_emb_dim,
     output_dim=tgt_lstm_op_dim,
-    batch_input=True,
     name='tgt_lstm'
 )
 
@@ -557,14 +340,6 @@ tgt_lstm_h_to_vocab = FullyConnectedLayer(
     batch_normalization=False,
     activation='softmax',
     name='tgt_lstm_h_to_vocab'
-)
-
-encoder_decoder_projection = FullyConnectedLayer(
-    input_dim=2 * src_lstm_op_dim,
-    output_dim=tgt_lstm_op_dim,
-    batch_normalization=False,
-    activation='tanh',
-    name='encoder_decoder_connection'
 )
 
 if args.attention == 'mlp':
@@ -585,8 +360,7 @@ if args.attention == 'mlp':
     )
 
 # Set model parameters
-params = src_embedding_layer.params + tgt_embedding_layer.params + \
-    encoder_decoder_projection.params
+params = src_embedding_layer.params + tgt_embedding_layer.params
 for rnn in encoder_forward + encoder_backward:
     params += rnn.params
 params += tgt_lstm.params[:-1] + tgt_lstm_h_to_vocab.params
@@ -628,7 +402,7 @@ encoder_final_state = encoder_representation.dimshuffle(1, 0, 2)[
 ]
 
 # Get Target LSTM representation & Attention Vectors
-tgt_lstm.h_0 = encoder_decoder_projection.fprop(encoder_final_state)
+tgt_lstm.h_0 = encoder_final_state
 tgt_lstm.fprop(tgt_emb_inp)
 
 # Attention
@@ -732,6 +506,11 @@ logging.info('cost : %.3f' % (cost.eval(
     }
 )))
 
+if args.load_model != 'none':
+    logging.info('Loading saved model ...')
+    src_word2ind, src_ind2word, tgt_word2ind, tgt_ind2word \
+        = load_model(args.load_model, params)
+
 logging.info('Compiling theano functions ...')
 
 updates = Optimizer(clip=5.0).adam(
@@ -750,17 +529,11 @@ f_eval = theano.function(
     outputs=final_output,
 )
 
-
-if args.load_model != 'none':
-    src_word2ind, src_ind2word, tgt_word2ind, tgt_ind2word \
-        = load_model(int(args.load_model), params)
-
 dev_tgt = [
     [word if word in tgt_word2ind else '<unk>' for word in sent]
     for sent in dev_tgt
 ]
 
-epoch_offset = 0 if args.load_model == 'none' else int(args.load_model)
 num_epochs = 100
 logging.info('Training network ...')
 BEST_BLEU = 1.0
@@ -771,7 +544,10 @@ for i in range(num_epochs):
     for j in xrange(0, len(train_src), batch_size):
         batch_src, batch_tgt_inp, batch_tgt_op, batch_src_lens, batch_tgt_mask \
             = prepare_batch(
-                train_src[j: j + batch_size], train_tgt[j: j + batch_size]
+                train_src[j: j + batch_size],
+                train_tgt[j: j + batch_size],
+                src_word2ind,
+                tgt_word2ind
             )
         entropy = f_train(
             batch_src,
@@ -782,19 +558,19 @@ for i in range(num_epochs):
         )
         costs.append(entropy)
         logging.info('Epoch : %d Minibatch : %d Loss : %.3f' % (
-            i + epoch_offset,
+            i,
             j,
             entropy
         ))
         if j % 64000 == 0 and j != 0:
             dev_predictions = decode_dev()
-            dev_bleu = get_validation_bleu(dev_predictions, dev_tgt)
+            dev_bleu = get_bleu(dev_predictions, dev_tgt)
             if dev_bleu > BEST_BLEU:
                 BEST_BLEU = dev_bleu
                 print_decoded_dev(dev_predictions)
-                save_model(i + epoch_offset, j, params)
+                save_model(i, j, params)
             logging.info('Epoch : %d Minibatch :%d dev BLEU : %.3f' % (
-                i + epoch_offset,
+                i,
                 j,
                 dev_bleu)
             )
@@ -803,14 +579,15 @@ for i in range(num_epochs):
         if j % 6400 == 0:
             generate_samples(batch_src, batch_tgt_inp, batch_src_lens)
     dev_predictions = decode_dev()
-    dev_bleu = get_validation_bleu(dev_predictions, dev_tgt)
+    dev_bleu = get_bleu(dev_predictions, dev_tgt)
     if dev_bleu > BEST_BLEU:
         BEST_BLEU = dev_bleu
         print_decoded_dev(dev_predictions)
-        save_model(i + epoch_offset, j, params)
+        save_model(i, j, params)
     logging.info('Epoch : %d dev BLEU : %.3f' % (
-        i + epoch_offset,
+        i,
         dev_bleu)
     )
     logging.info('Mean Cost : %.3f' % (np.mean(costs)))
     costs = []
+    save_model(i, j, params)
