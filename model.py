@@ -5,7 +5,7 @@ import numpy as np
 import codecs
 import sys
 
-sys.path.append('/u/subramas/Research/SanDeepLearn/')
+sys.path.append('/home/subras/Research/SanDeepLearn/')
 
 from recurrent import FastLSTM
 

@@ -70,7 +70,7 @@ data_path_train_src = args.train_src_sentences
 data_path_dev_src = args.dev_src_sentences
 np.random.seed(seed=int(args.seed))  # set seed for an experiment
 experiment_name = args.experiment_name
-batch_size = args.batch_size
+batch_size = int(args.batch_size)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -157,7 +157,7 @@ def generate_samples(
             src_ind2word[x] for x in batch_src[ind]]
         )))
         logging.info('Sample : %s ' % (' '.join([
-            src_word2ind[x] for x in decoded_batch[ind]]
+            src_ind2word[x] for x in decoded_batch[ind]]
         )))
         logging.info('=======================================================')
 
@@ -235,6 +235,7 @@ tgt_lstm_0 = FastLSTM(
     name='tgt_lstm_0'
 )
 
+'''
 tgt_lstm_1 = FastLSTM(
     input_dim=1024,
     output_dim=1024,
@@ -246,6 +247,7 @@ tgt_lstm_2 = FastLSTM(
     output_dim=1024,
     name='tgt_lstm_2'
 )
+'''
 
 tgt_lstm_h_to_vocab = FullyConnectedLayer(
     input_dim=1024,
@@ -256,13 +258,13 @@ tgt_lstm_h_to_vocab = FullyConnectedLayer(
 )
 
 # Set model parameters
-params = tgt_embedding_layer.params
-params += [
+# params = tgt_embedding_layer.params
+params = [
     src_lstm_0.h_0, src_lstm_0.c_0, src_lstm_1.h_0, src_lstm_1.c_0,
     src_lstm_2.h_0, src_lstm_2.c_0
 ]
 
-for ind, rnn in enumerate([tgt_lstm_0, tgt_lstm_1, tgt_lstm_2]):
+for ind, rnn in enumerate([tgt_lstm_0]):
     if ind == 0:
         params += rnn.params[:-1]
     else:
@@ -274,13 +276,13 @@ logging.info('Model parameters ...')
 logging.info('Src Embedding dim : %d ' % (src_embedding_layer.output_dim))
 logging.info('Tgt Embedding dim : %d ' % (tgt_embedding_layer.output_dim))
 logging.info('Encoder dim : %d ' % (src_lstm_2.output_dim))
-logging.info('Batch size : %s ' % (batch_size))
+logging.info('Batch size : %d ' % (batch_size))
 logging.info('Decoder LSTM dim : %d ' % (tgt_lstm_2.output_dim))
 logging.info('Depth : %s ' % ('3'))
 
 # Get embedding matrices
 src_emb_inp = src_embedding_layer.fprop(src_inp)
-tgt_emb_inp = tgt_embedding_layer.fprop(src_inp[:, :-1])
+tgt_emb_inp = src_embedding_layer.fprop(src_inp[:, :-1])
 
 # Get encoder representation
 src_lstm_0.fprop(src_emb_inp)
@@ -317,10 +319,11 @@ cost = - (T.log(final_output[
             tgt_emb_inp.shape[1],
             axis=1
         ).flatten(),
-    T.arange(tgt_emb_inp.shape[1]).dimshuffle('x', 0).repeat(
-        tgt_emb_inp.shape[0],
-        axis=0
-    ).flatten(),
+    T.arange(
+        tgt_emb_inp.shape[1]).dimshuffle('x', 0).repeat(
+            tgt_emb_inp.shape[0],
+            axis=0
+        ).flatten(),
     src_inp[:, 1:].flatten()
 ]) * tgt_mask.flatten()).sum() / T.neq(tgt_mask, 0).sum()
 
