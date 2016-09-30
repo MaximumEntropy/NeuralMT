@@ -159,7 +159,7 @@ def append_to_vocab(
     max_ind = max(ind2word.keys()) + 1
     ind = max_ind
     for line in lines:
-        for word in line.split():
+        for word in line:
             if word not in word2ind:
                 word2ind[word] = ind
                 ind2word[ind] = word
