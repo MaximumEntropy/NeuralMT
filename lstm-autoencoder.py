@@ -219,7 +219,7 @@ index = T.scalar()
 # Create synthetic data to test computation graph
 src_inp_t = np.random.randint(low=1, high=100, size=(5, 10)).astype(np.int32)
 src_lens_t = np.random.randint(low=1, high=9, size=(5,)).astype(np.int32)
-tgt_mask_t = np.float32(np.random.rand(5, 15).astype(np.float32) > 0.5)
+tgt_mask_t = np.float32(np.random.rand(5, 9).astype(np.float32) > 0.5)
 
 src_embedding_layer = EmbeddingLayer(
     input_dim=src_embedding.shape[0],
@@ -267,8 +267,11 @@ params += [
     src_lstm_2.h_0, src_lstm_2.c_0
 ]
 
-for rnn in [tgt_lstm_0, tgt_lstm_1, tgt_lstm_2]:
-    params += rnn.params
+for ind, rnn in enumerate([tgt_lstm_0, tgt_lstm_1, tgt_lstm_2]):
+    if ind == 0:
+        params += rnn.params[:-1]
+    else:
+        params += rnn.params
 
 params += tgt_lstm_h_to_vocab.params
 
