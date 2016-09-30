@@ -197,7 +197,7 @@ src_ind2word = {ind: word for ind, word in enumerate(words)}
 
 # Get training and dev vocabularies
 logging.info('Getting vocabularies ...')
-src_embedding, src_word2ind, src_ind2word = append_to_vocab(
+src_word2ind, src_ind2word, src_embedding = append_to_vocab(
     train_src,
     src_word2ind,
     src_ind2word,
