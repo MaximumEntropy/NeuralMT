@@ -166,7 +166,7 @@ def append_to_vocab(
                 ind += 1
     diff = ind - max_ind
     additional_embeddings = np.random.rand(diff, embedding.shape[1])
-    embedding = np.vstack(embedding, additional_embeddings).astype(np.float32)
+    embedding = np.vstack((embedding, additional_embeddings)).astype(np.float32)
     assert embedding.shape[0] == len(word2ind) == len(ind2word)
     return word2ind, ind2word, embedding
 
