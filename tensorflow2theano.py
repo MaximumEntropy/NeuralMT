@@ -50,6 +50,7 @@ with tf.device('/cpu:0'):
         use_lstm=True
     )
     model.saver.restore(sess, ckpt.model_checkpoint_path)
+    print ('Restored model ...')
     for var in tf.trainable_variables():
         print(var.name, var.get_shape())
         if not var.name.startswith('embedding_attention_seq2seq'):
