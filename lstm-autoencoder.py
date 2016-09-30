@@ -144,22 +144,17 @@ def print_decoded_dev(dev_predictions, n=10):
 
 def generate_samples(
     batch_src,
-    batch_tgt_inp,
     batch_src_lens,
 ):
     """Generate random samples."""
     decoded_batch = f_eval(
         batch_src,
-        batch_tgt_inp,
         batch_src_lens,
     )
     decoded_batch = np.argmax(decoded_batch, axis=2)
     for ind, sentence in enumerate(decoded_batch[:10]):
         logging.info('Src : %s ' % (' '.join([
             src_ind2word[x] for x in batch_src[ind]]
-        )))
-        logging.info('Tgt : %s ' % (' '.join([
-            src_word2ind[x] for x in batch_tgt_inp[ind]]
         )))
         logging.info('Sample : %s ' % (' '.join([
             src_word2ind[x] for x in decoded_batch[ind]]
@@ -376,4 +371,59 @@ f_eval = theano.function(
     inputs=[src_inp, src_lens],
     outputs=final_output,
 )
-    
+
+num_epochs = 100
+logging.info('Training network ...')
+BEST_BLEU = 1.0
+costs = []
+for i in range(num_epochs):
+    logging.info('Shuffling data ...')
+    for j in xrange(0, len(train_src), batch_size):
+        batch_src, batch_src_lens, batch_tgt_mask = prepare_autoencode_batch(
+            train_src[j: j + batch_size],
+            src_word2ind,
+        )
+        entropy = f_train(
+            batch_src,
+            batch_src_lens,
+            batch_tgt_mask
+        )
+        costs.append(entropy)
+        logging.info('Epoch : %d Minibatch : %d Loss : %.3f' % (
+            i,
+            j,
+            entropy
+        ))
+        '''
+        if j % 64000 == 0 and j != 0:
+            dev_predictions = decode_dev()
+            dev_bleu = get_bleu(dev_predictions, dev_tgt)
+            if dev_bleu > BEST_BLEU:
+                BEST_BLEU = dev_bleu
+                print_decoded_dev(dev_predictions)
+                save_model(i, j, params)
+            logging.info('Epoch : %d Minibatch :%d dev BLEU : %.3f' % (
+                i,
+                j,
+                dev_bleu)
+            )
+            logging.info('Mean Cost : %.3f' % (np.mean(costs)))
+            costs = []
+        '''
+        if j % 6400 == 0:
+            generate_samples(batch_src, batch_src_lens)
+    '''
+    dev_predictions = decode_dev()
+    dev_bleu = get_bleu(dev_predictions, dev_tgt)
+    if dev_bleu > BEST_BLEU:
+        BEST_BLEU = dev_bleu
+        print_decoded_dev(dev_predictions)
+        save_model(i, j, params)
+    logging.info('Epoch : %d dev BLEU : %.3f' % (
+        i,
+        dev_bleu)
+    )
+    logging.info('Mean Cost : %.3f' % (np.mean(costs)))
+    costs = []
+    save_model(i, j, params)
+    '''
