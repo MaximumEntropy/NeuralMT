@@ -13,6 +13,7 @@ from model import save_model, load_model, get_pretrained_embedding_layer
 from bleu import get_bleu
 from data_utils import prepare_batch, prepare_evaluation_batch, get_vocab, \
     shuffle_data
+from bucket import bucket_data
 
 sys.path.append('/u/subramas/Research/SanDeepLearn/')
 
@@ -219,6 +220,10 @@ train_tgt = [line.strip().split() for line in codecs.open(
     'r',
     encoding='utf-8'
 )]
+
+bucket_data(train_src, train_tgt)
+
+exit(0)
 
 dev_src = [line.strip().lower().split() for line in codecs.open(
     data_path_dev_src,
