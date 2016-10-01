@@ -54,7 +54,7 @@ def prepare_autoencode_batch(
     src_word2ind
 ):
     """Prepare a mini-batch for training."""
-    src_sentences = [['<s>'] + sent[:40] + ['</s>'] for sent in src_sentences]
+    src_sentences = [['_GO'] + sent[:40] + ['_GO'] for sent in src_sentences]
     src_lens = [len(sent) for sent in src_sentences]
     max_src_len = max(src_lens)
     src_sentences = [
@@ -67,7 +67,7 @@ def prepare_autoencode_batch(
     ]
     tgt_mask = np.array(
         [
-            ([1] * (l - 2)) + ([0] * (max_src_len - l))
+            ([1] * (l - 1)) + ([0] * (max_src_len - l))
             for l in src_lens
         ]
     ).astype(np.float32)

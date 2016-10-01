@@ -235,7 +235,6 @@ tgt_lstm_0 = FastLSTM(
     name='tgt_lstm_0'
 )
 
-'''
 tgt_lstm_1 = FastLSTM(
     input_dim=1024,
     output_dim=1024,
@@ -247,10 +246,9 @@ tgt_lstm_2 = FastLSTM(
     output_dim=1024,
     name='tgt_lstm_2'
 )
-'''
 
 tgt_lstm_h_to_vocab = FullyConnectedLayer(
-    input_dim=1024,
+    input_dim=1024 * 2,
     output_dim=tgt_embedding_layer.input_dim,
     batch_normalization=False,
     activation='softmax',
@@ -264,7 +262,7 @@ params = [
     src_lstm_2.h_0, src_lstm_2.c_0
 ]
 
-for ind, rnn in enumerate([tgt_lstm_0]):
+for ind, rnn in enumerate([tgt_lstm_0, tgt_lstm_1, tgt_lstm_2]):
     if ind == 0:
         params += rnn.params[:-1]
     else:
@@ -277,7 +275,7 @@ logging.info('Src Embedding dim : %d ' % (src_embedding_layer.output_dim))
 logging.info('Tgt Embedding dim : %d ' % (tgt_embedding_layer.output_dim))
 logging.info('Encoder dim : %d ' % (src_lstm_2.output_dim))
 logging.info('Batch size : %d ' % (batch_size))
-logging.info('Decoder LSTM dim : %d ' % (tgt_lstm_2.output_dim))
+logging.info('Decoder LSTM dim : %d ' % (tgt_lstm_0.output_dim))
 logging.info('Depth : %s ' % ('3'))
 
 # Get embedding matrices
@@ -301,9 +299,22 @@ tgt_lstm_0.fprop(tgt_emb_inp)
 tgt_lstm_1.fprop(tgt_lstm_0.h)
 tgt_lstm_2.fprop(tgt_lstm_1.h)
 
+attention = T.batched_dot(
+    tgt_lstm_2.h.dimshuffle(1, 0, 2),
+    src_lstm_2.h.dimshuffle(1, 2, 0)
+)
+attention = T.batched_dot(
+    attention,
+    src_lstm_2.h.dimshuffle(1, 0, 2)
+)
+
+target_representation = T.concatenate(
+    [attention, tgt_lstm_2.h.dimshuffle(1, 0, 2)],
+    axis=2
+)
 # Project to target vocabulary and softmax
-proj_layer_input = tgt_lstm_2.h.reshape(
-    (src_inp.shape[0] * (src_inp.shape[1] - 1), tgt_lstm_2.h.shape[2])
+proj_layer_input = target_representation.reshape(
+    (src_inp.shape[0] * (src_inp.shape[1] - 1), 2 * tgt_lstm_2.h.shape[2])
 )
 proj_output_rep = tgt_lstm_h_to_vocab.fprop(proj_layer_input)
 final_output = proj_output_rep.reshape(
@@ -397,36 +408,12 @@ for i in range(num_epochs):
             j,
             entropy
         ))
-        '''
-        if j % 64000 == 0 and j != 0:
-            dev_predictions = decode_dev()
-            dev_bleu = get_bleu(dev_predictions, dev_tgt)
-            if dev_bleu > BEST_BLEU:
-                BEST_BLEU = dev_bleu
-                print_decoded_dev(dev_predictions)
-                save_model(i, j, params)
-            logging.info('Epoch : %d Minibatch :%d dev BLEU : %.3f' % (
-                i,
-                j,
-                dev_bleu)
-            )
+        if j % 64000 == 0 and j != 0:        
+            save_model(i, params, experiment_name, src_word2ind, src_ind2word)
             logging.info('Mean Cost : %.3f' % (np.mean(costs)))
             costs = []
-        '''
         if j % 6400 == 0:
             generate_samples(batch_src, batch_src_lens)
-    '''
-    dev_predictions = decode_dev()
-    dev_bleu = get_bleu(dev_predictions, dev_tgt)
-    if dev_bleu > BEST_BLEU:
-        BEST_BLEU = dev_bleu
-        print_decoded_dev(dev_predictions)
-        save_model(i, j, params)
-    logging.info('Epoch : %d dev BLEU : %.3f' % (
-        i,
-        dev_bleu)
-    )
+    save_model(i, params, experiment_name, src_word2ind, src_ind2word)
     logging.info('Mean Cost : %.3f' % (np.mean(costs)))
     costs = []
-    save_model(i, j, params)
-    '''

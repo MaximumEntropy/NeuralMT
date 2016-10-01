@@ -17,28 +17,25 @@ def str2float(line):
 
 def save_model(
     epoch,
-    minibatch,
     model_params,
     experiment_name,
     src_word2ind,
-    tgt_word2ind,
     src_ind2word,
-    tgt_ind2word
+    tgt_word2ind=None,
+    tgt_ind2word=None
 ):
     """Save the entire model."""
     if not os.path.exists('/data/lisatmp4/subramas/models/%s' % (
         experiment_name
     )):
         os.mkdir('/data/lisatmp4/subramas/models/%s' % (experiment_name))
-    os.mkdir('/data/lisatmp4/subramas/models/%s/epoch_%d_minibatch_%d' % (
+    os.mkdir('/data/lisatmp4/subramas/models/%s/epoch_%d' % (
         experiment_name,
         epoch,
-        minibatch
     ))
-    model_path = '/data/lisatmp4/subramas/models/%s/epoch_%d_minibatch_%d' % (
+    model_path = '/data/lisatmp4/subramas/models/%s/epoch_%d' % (
         experiment_name,
         epoch,
-        minibatch
     )
     for param in model_params:
         np.save('%s/%s' % (model_path, param.name), param.get_value())
@@ -48,12 +45,14 @@ def save_model(
     pickle.dump(
         src_ind2word, open('%s/%s' % (model_path, 'src_ind2word'), 'wb')
     )
-    pickle.dump(
-        tgt_word2ind, open('%s/%s' % (model_path, 'tgt_word2ind'), 'wb')
-    )
-    pickle.dump(
-        tgt_ind2word, open('%s/%s' % (model_path, 'tgt_ind2word'), 'wb')
-    )
+    if tgt_word2ind is not None:
+        pickle.dump(
+            tgt_word2ind, open('%s/%s' % (model_path, 'tgt_word2ind'), 'wb')
+        )
+    if tgtind2word is not None:
+        pickle.dump(
+            tgt_ind2word, open('%s/%s' % (model_path, 'tgt_ind2word'), 'wb')
+        )
 
 
 def load_model(name, model_params):
