@@ -25,10 +25,9 @@ parser.add_argument(
 args = parser.parse_args()
 
 print 'Reading file ...'
-lines = [line.strip().lower().split() for line in codecs.open(
+lines = [line.strip().lower().split() for line in open(
     args.input_file,
     'r',
-    encoding='utf-8'
 )]
 
 vocab = {}
@@ -58,9 +57,11 @@ unked_lines = [
     for line in lines
 ]
 
-f = codecs.open(args.output_file, 'w', encoding='utf-8')
+f = open(args.output_file, 'w')
 
 print 'Writing output file ...'
-for line in unked_lines:
+for ind, line in enumerate(unked_lines):
+    if ind % 100000 == 0:
+        print 'Finished %d out of %d lines ' % (ind, len(unked_lines))
     f.write(' '.join(line) + '\n')
 f.close()

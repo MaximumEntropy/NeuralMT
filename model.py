@@ -5,7 +5,7 @@ import numpy as np
 import codecs
 import sys
 
-sys.path.append('/home/subras/Research/SanDeepLearn/')
+sys.path.append('/u/subramas/Research/SanDeepLearn/')
 
 from recurrent import FastLSTM
 
@@ -17,25 +17,28 @@ def str2float(line):
 
 def save_model(
     epoch,
+    minibatch,
     model_params,
     experiment_name,
     src_word2ind,
+    tgt_word2ind,
     src_ind2word,
-    tgt_word2ind=None,
-    tgt_ind2word=None
+    tgt_ind2word
 ):
     """Save the entire model."""
     if not os.path.exists('/data/lisatmp4/subramas/models/%s' % (
         experiment_name
     )):
         os.mkdir('/data/lisatmp4/subramas/models/%s' % (experiment_name))
-    os.mkdir('/data/lisatmp4/subramas/models/%s/epoch_%d' % (
+    os.mkdir('/data/lisatmp4/subramas/models/%s/epoch_%d_minibatch_%d' % (
         experiment_name,
         epoch,
+        minibatch
     ))
-    model_path = '/data/lisatmp4/subramas/models/%s/epoch_%d' % (
+    model_path = '/data/lisatmp4/subramas/models/%s/epoch_%d_minibatch_%d' % (
         experiment_name,
         epoch,
+        minibatch
     )
     for param in model_params:
         np.save('%s/%s' % (model_path, param.name), param.get_value())
@@ -45,17 +48,15 @@ def save_model(
     pickle.dump(
         src_ind2word, open('%s/%s' % (model_path, 'src_ind2word'), 'wb')
     )
-    if tgt_word2ind is not None:
-        pickle.dump(
-            tgt_word2ind, open('%s/%s' % (model_path, 'tgt_word2ind'), 'wb')
-        )
-    if tgtind2word is not None:
-        pickle.dump(
-            tgt_ind2word, open('%s/%s' % (model_path, 'tgt_ind2word'), 'wb')
-        )
+    pickle.dump(
+        tgt_word2ind, open('%s/%s' % (model_path, 'tgt_word2ind'), 'wb')
+    )
+    pickle.dump(
+        tgt_ind2word, open('%s/%s' % (model_path, 'tgt_ind2word'), 'wb')
+    )
 
 
-def load_model(name, model_params):
+def load_model(name, model_params, autoencoder=False):
     """Load a model's parameters."""
     parent_folder = name.split('/')[0]
     child_folder = name.split('/')[1]
@@ -63,6 +64,7 @@ def load_model(name, model_params):
         parent_folder,
         child_folder
     )
+    tgt_word2ind, tgt_ind2word = None, None
     for param in model_params:
         assert os.path.exists('%s/%s.npy' % (model_path, param.name))
     for param in model_params:
@@ -75,12 +77,13 @@ def load_model(name, model_params):
     src_ind2word = pickle.load(
         open('%s/%s' % (model_path, 'src_ind2word'), 'rb')
     )
-    tgt_word2ind = pickle.load(
-        open('%s/%s' % (model_path, 'tgt_word2ind'), 'rb')
-    )
-    tgt_ind2word = pickle.load(
-        open('%s/%s' % (model_path, 'tgt_ind2word'), 'rb')
-    )
+    if not autoencoder:
+        tgt_word2ind = pickle.load(
+            open('%s/%s' % (model_path, 'tgt_word2ind'), 'rb')
+        )
+        tgt_ind2word = pickle.load(
+            open('%s/%s' % (model_path, 'tgt_ind2word'), 'rb')
+        )
 
     return src_word2ind, src_ind2word, tgt_word2ind, tgt_ind2word
 

@@ -3,6 +3,16 @@ import numpy as np
 from sklearn.utils import shuffle
 
 
+def get_src_mask(src_lens, max_src_len):
+    """Get a mask for the src minibatch."""
+    return np.array(
+        [
+            ([1] * (l - 1)) + ([0] * (max_src_len - l))
+            for l in src_lens
+        ]
+    ).transpose().astype(np.float32)
+
+
 def prepare_batch(src_sentences, tgt_sentences, src_word2ind, tgt_word2ind):
     """Prepare a mini-batch for training."""
     src_sentences = [['<s>'] + sent[:40] + ['</s>'] for sent in src_sentences]
@@ -12,26 +22,17 @@ def prepare_batch(src_sentences, tgt_sentences, src_word2ind, tgt_word2ind):
     max_src_len = max(src_lens)
     max_tgt_len = max(tgt_lens)
     src_sentences = [
-        [
-            src_word2ind[w] if w in src_word2ind else src_word2ind['<unk>']
-            for w in sent
-        ] +
-        [src_word2ind['<unk>']] * (max_src_len - len(sent))
+        [src_word2ind[w] for w in sent] +
+        [src_word2ind['<pad>']] * (max_src_len - len(sent))
         for sent in src_sentences
     ]
     tgt_sentences_inp = [
-        [
-            tgt_word2ind[w] if w in tgt_word2ind else tgt_word2ind['<unk>']
-            for w in sent[:-1]
-        ] +
-        [tgt_word2ind['<unk>']] * (max_tgt_len - len(sent))
+        [tgt_word2ind[w] for w in sent[:-1]] +
+        [tgt_word2ind['<pad>']] * (max_tgt_len - len(sent))
         for sent in tgt_sentences
     ]
     tgt_sentences_op = [
-        [
-            tgt_word2ind[w] if w in tgt_word2ind else tgt_word2ind['<unk>']
-            for w in sent[1:]
-        ] +
+        [tgt_word2ind[w] for w in sent[1:]] +
         [tgt_word2ind['<unk>']] * (max_tgt_len - len(sent))
         for sent in tgt_sentences
     ]
@@ -41,12 +42,13 @@ def prepare_batch(src_sentences, tgt_sentences, src_word2ind, tgt_word2ind):
             for l in tgt_lens
         ]
     ).astype(np.float32)
+    src_mask = get_src_mask(src_lens, max_src_len)
     src_sentences = np.array(src_sentences).astype(np.int32)
     tgt_sentences_inp = np.array(tgt_sentences_inp).astype(np.int32)
     tgt_sentences_op = np.array(tgt_sentences_op).astype(np.int32)
     src_lens = np.array(src_lens).astype(np.int32)
     return src_sentences, tgt_sentences_inp, tgt_sentences_op, \
-        src_lens, tgt_mask
+        src_lens, src_mask, tgt_mask
 
 
 def prepare_autoencode_batch(
@@ -54,7 +56,7 @@ def prepare_autoencode_batch(
     src_word2ind
 ):
     """Prepare a mini-batch for training."""
-    src_sentences = [['_GO'] + sent[:40] + ['_GO'] for sent in src_sentences]
+    src_sentences = [['_GO'] + sent[:40] + ['_EOS'] for sent in src_sentences]
     src_lens = [len(sent) for sent in src_sentences]
     max_src_len = max(src_lens)
     src_sentences = [
@@ -62,7 +64,7 @@ def prepare_autoencode_batch(
             src_word2ind[w] if w in src_word2ind else src_word2ind['_UNK']
             for w in sent
         ] +
-        [src_word2ind['_UNK']] * (max_src_len - len(sent))
+        [src_word2ind['_PAD']] * (max_src_len - len(sent))
         for sent in src_sentences
     ]
     tgt_mask = np.array(
@@ -124,11 +126,12 @@ def prepare_evaluation_batch(src_sentences, src_word2ind):
             src_word2ind[w] if w in src_word2ind else src_word2ind['<unk>']
             for w in sent
         ] +
-        [src_word2ind['<unk>']] * (max_src_len - len(sent))
+        [src_word2ind['<pad>']] * (max_src_len - len(sent))
         for sent in src_sentences
     ]
+    src_mask = get_src_mask(src_lens, max_src_len)
     src_sentences = np.array(src_sentences).astype(np.int32)
-    return src_sentences, src_lens
+    return src_sentences, src_lens, src_mask
 
 
 def get_vocab(lines):
@@ -140,6 +143,7 @@ def get_vocab(lines):
     vocab.add('<s>')
     vocab.add('</s>')
     vocab.add('<unk>')
+    vocab.add('<pad>')
     word2ind = {}
     ind2word = {}
 
